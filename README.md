@@ -11,8 +11,8 @@
 **PyCrit-IA**
 -Análisis del Pensamiento Crítico y Uso de Inteligencia Artificial en Estudiantes Universitarios
 
-**Descripción del Proyecto
--PyCrit-IA es una aplicación desarrollada en Python que permite analizar la relación entre el pensamiento crítico, el uso de herramientas de inteligencia artificial (IA) y el rendimiento académico en estudiantes universitarios.
+**Descripción del Proyecto**
+PyCrit-IA es una aplicación desarrollada en Python que permite analizar la relación entre el pensamiento crítico, el uso de herramientas de inteligencia artificial (IA) y el rendimiento académico en estudiantes universitarios.
 El prototipo busca responder a una problemática actual: el uso creciente de la IA en contextos educativos puede, si se aplica sin criterio, reducir la autonomía y las habilidades analíticas del estudiante. PyCrit-IA aborda este reto mediante un sistema que limpia, estandariza y visualiza datos de encuestas estudiantiles para generar conocimiento útil sobre hábitos de estudio y razonamiento crítico.
 
 **Objetivos del Proyecto**
