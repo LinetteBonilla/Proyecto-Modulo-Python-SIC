@@ -69,7 +69,7 @@ class IAAnalisisApp:
         header_frame.pack_propagate(False)
         try:
             # Ruta de tu logo (si no existe, muestra solo el título)
-            logo_path = r"Logo_Proyecto_Samsung.png"
+            logo_path = r"C:\Users\Imanol Rodríguez\OneDrive\Desktop\Proyecto_Samsung\Logo_Proyecto_Samsung.png"
             if os.path.exists(logo_path):
                 img = Image.open(logo_path)
                 ar = img.width / img.height
@@ -247,48 +247,154 @@ class IAAnalisisApp:
             msg += "  ✓ pc_total\n\nVariables de análisis:\n  ✓ promedio_academico\n  ✓ horas_estudio_dia\n  ✓ metodo_estudio\n\nPuedes proceder a limpiar los datos."
             messagebox.showinfo("Validación", msg)
 
-    # ==================== LIMPIEZA ====================
+    # ==================== LIMPIEZA (helpers) ====================
+    def _sanitize_str(self, x):
+        if pd.isna(x):
+            return ""
+        return str(x).strip().upper()
+
+    def _normalizar_categoria(self, serie, mapping, desconocido="DESCONOCIDO"):
+        """
+        Limpia espacios, pasa a mayúsculas y mapea sinónimos.
+        Convierte vacíos y N/A a DESCONOCIDO.
+        """
+        s = serie.apply(self._sanitize_str)
+        vacios = s.isin(["", "NAN", "NA", "N/A", "NONE", "NULL"])
+        s[vacios] = desconocido
+        s = s.map(lambda v: mapping.get(v, mapping.get(v.strip(), v)))
+        s = s.replace({"": desconocido})
+        return s
+
     def limpiar_datos(self):
         if self.df is None:
             messagebox.showwarning("Advertencia", "Primero carga un dataset")
             return
 
+        # Log en el panel de texto
+        self.txt_limpieza.delete(1.0, tk.END)
+        log = self.txt_limpieza
+
         try:
-            self.df_limpio = self.df.copy()
+            df = self.df.copy()
+            filas_ini, cols_ini = df.shape
 
-            # Promedio [1-3]
-            if 'promedio_academico' in self.df_limpio.columns:
-                s = pd.to_numeric(self.df_limpio['promedio_academico'], errors='coerce')
-                s = s.clip(1, 3)
-                if s.isna().sum() > 0:
-                    s = s.fillna(s.median())
-                self.df_limpio['promedio_academico'] = s
+            log.insert(tk.END, "="*70 + "\nLIMPIEZA Y ESTANDARIZACIÓN (v2)\n" + "="*70 + "\n\n")
 
-            # Horas + bins
-            if 'horas_estudio_dia' in self.df_limpio.columns:
-                s = pd.to_numeric(self.df_limpio['horas_estudio_dia'], errors='coerce').clip(lower=0)
-                if s.isna().sum() > 0:
-                    s = s.fillna(s.median())
-                self.df_limpio['horas_estudio_dia'] = s
-                self.df_limpio['horas_bin'] = pd.cut(s, bins=[-0.001, 2, 5, 10], labels=['0-2h', '3-5h', '6+h'])
+            # ---------- 0) Quitar columnas basura conocidas ----------
+            basura_cols = [c for c in df.columns if c.lower().startswith("columna_ruido")]
+            if basura_cols:
+                df.drop(columns=basura_cols, inplace=True, errors="ignore")
+                log.insert(tk.END, f"🧹 Columnas basura eliminadas: {', '.join(basura_cols)}\n")
 
-            # Categóricas
-            for c in ['metodo_estudio', 'ia_frecuencia', 'facultad', 'sexo']:
-                if c in self.df_limpio.columns:
-                    self.df_limpio[c] = (self.df_limpio[c].astype(str).str.upper()
-                                         .str.strip().replace('NAN', 'DESCONOCIDO'))
+            # ---------- 1) Eliminar duplicados (por todas las columnas) ----------
+            dups = df.duplicated().sum()
+            if dups > 0:
+                df = df.drop_duplicates().reset_index(drop=True)
+                log.insert(tk.END, f"🗑️ Filas duplicadas eliminadas: {dups}\n")
+            else:
+                log.insert(tk.END, "✓ Sin duplicados exactos\n")
 
-            # Pensamiento crítico
-            pcs = [c for c in self.pc_cols if c in self.df_limpio.columns]
-            for c in pcs:
-                s = pd.to_numeric(self.df_limpio[c], errors='coerce').clip(1, 5).round(2)
-                if s.isna().sum() > 0:
-                    s = s.fillna(s.median())
-                self.df_limpio[c] = s
-            if pcs:
-                self.df_limpio['pc_total'] = self.df_limpio[pcs].mean(axis=1).round(2)
+            # ---------- 2) PROMEDIO ACADÉMICO [1-3] ----------
+            if "promedio_academico" in df.columns:
+                s = pd.to_numeric(df["promedio_academico"], errors="coerce")
+                invalidos = s.isna().sum()
+                s = s.clip(lower=1, upper=3)           # límites válidos
+                med = s.median(skipna=True)
+                s = s.fillna(med)                      # imputación
+                df["promedio_academico"] = s
+                log.insert(tk.END, f"📚 promedio_academico → inválidos/imputados: {invalidos}, mediana={med:.2f}\n")
 
-            messagebox.showinfo("Éxito", "Datos limpiados y estandarizados correctamente.")
+            # ---------- 3) HORAS DE ESTUDIO ----------
+            if "horas_estudio_dia" in df.columns:
+                h = pd.to_numeric(df["horas_estudio_dia"], errors="coerce")
+                antes_nan = h.isna().sum()
+                h[(h < 0) | (h > 16)] = np.nan          # negativos y > 16h/día como inválidos
+                extremos = h.isna().sum() - antes_nan
+                med = h.median(skipna=True)
+                h = h.fillna(med)
+                df["horas_estudio_dia"] = h
+                df["horas_bin"] = pd.cut(h, bins=[-0.001, 2, 5, 16], labels=["0-2h", "3-5h", "6+h"])
+                log.insert(tk.END, f"⏰ horas_estudio_dia → outliers>16/negativos: {extremos}, imputación mediana={med:.2f}\n")
+
+            # ---------- 4) CATEGORÍAS: MÉTODO E IA ----------
+            map_metodo = {
+                "INDIVIDUAL": "INDIVIDUAL", "  INDIVIDUAL": "INDIVIDUAL",
+                "GRUPAL": "GRUPAL", "  GRUPAL": "GRUPAL",
+                "DIGITAL": "DIGITAL",
+                "LIBROS": "LIBROS",
+                "DESCONOCIDO": "DESCONOCIDO",
+            }
+            map_ia = {
+                "DIARIO": "DIARIO", "SEMANAL": "SEMANAL", "MENSUAL": "MENSUAL",
+                "NUNCA": "NUNCA", "OCASIONAL": "OCASIONAL", "RARA VEZ": "OCASIONAL",
+                "DESCONOCIDO": "DESCONOCIDO",
+            }
+
+            if "metodo_estudio" in df.columns:
+                df["metodo_estudio"] = self._normalizar_categoria(df["metodo_estudio"], map_metodo)
+                log.insert(tk.END, "🧭 metodo_estudio normalizado (espacios, mayúsc., N/A → DESCONOCIDO)\n")
+
+            if "ia_frecuencia" in df.columns:
+                df["ia_frecuencia"] = self._normalizar_categoria(df["ia_frecuencia"], map_ia)
+                log.insert(tk.END, "🤖 ia_frecuencia normalizada (sinónimos y N/A)\n")
+
+            # ---------- 5) PENSAMIENTO CRÍTICO Likert [1-5] ----------
+            pc_cols_presentes = [c for c in self.pc_cols if c in df.columns]
+            for c in pc_cols_presentes:
+                s = pd.to_numeric(df[c], errors="coerce")
+                inval = s.isna().sum()
+                s = s.clip(lower=1, upper=5)
+                med = s.median(skipna=True)
+                s = s.fillna(med)
+                df[c] = s
+                log.insert(tk.END, f"🧠 {c} → inválidos/imputados: {inval}, mediana={med:.2f}\n")
+
+            if pc_cols_presentes:
+                df["pc_total"] = df[pc_cols_presentes].mean(axis=1).round(2)
+                log.insert(tk.END, f"   ► pc_total recalculado con {len(pc_cols_presentes)} dimensiones\n")
+
+            # ---------- 6) EDAD / SEMESTRE ----------
+            if "edad" in df.columns:
+                s = pd.to_numeric(df["edad"], errors="coerce")
+                s[(s < 16) | (s > 80)] = np.nan
+                med = s.median(skipna=True)
+                df["edad"] = s.fillna(med)
+                log.insert(tk.END, f"👤 edad → fuera de rango imputados a mediana={med:.0f}\n")
+
+            if "semestre" in df.columns:
+                s = pd.to_numeric(df["semestre"], errors="coerce")
+                s[(s < 1) | (s > 12)] = np.nan
+                med = s.median(skipna=True)
+                df["semestre"] = s.fillna(med)
+                log.insert(tk.END, f"🏫 semestre → fuera de rango imputados a mediana={med:.0f}\n")
+
+            # ---------- 7) Strings con espacios extra ----------
+            for c in df.columns:
+                if df[c].dtype == object:
+                    df[c] = (df[c].astype(str)
+                                   .str.strip()
+                                   .str.upper()
+                                   .replace({"NAN": "DESCONOCIDO", "": "DESCONOCIDO"}))
+
+            # ---------- 8) Validación final mínima ----------
+            cols_clave = [c for c in ["promedio_academico", "horas_estudio_dia", "pc_total"] if c in df.columns]
+            if cols_clave:
+                antes = len(df)
+                df = df.dropna(subset=cols_clave)
+                eliminadas = antes - len(df)
+                if eliminadas > 0:
+                    log.insert(tk.END, f"🚮 Filas eliminadas por NaN en claves {cols_clave}: {eliminadas}\n")
+
+            # ---------- 9) Resumen ----------
+            filas_fin, cols_fin = df.shape
+            log.insert(tk.END, f"\nResumen: {filas_ini}×{cols_ini}  →  {filas_fin}×{cols_fin}\n")
+            log.insert(tk.END, "✅ LIMPIEZA COMPLETADA (v2)\n")
+
+            self.df_limpio = df
+            self.mostrar_vista_previa(self.tree_limpiar, self.df_limpio)
+            messagebox.showinfo("Éxito",
+                "Datos limpiados y estandarizados correctamente (v2).\nRevisa el log para ver duplicados eliminados, categorías normalizadas y outliers tratados.")
+
         except Exception as e:
             messagebox.showerror("Error", f"Error en la limpieza:\n{str(e)}")
 
