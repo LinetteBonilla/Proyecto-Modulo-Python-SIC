@@ -69,7 +69,7 @@ class IAAnalisisApp:
         header_frame.pack_propagate(False)
         try:
             # Ruta de tu logo (si no existe, muestra solo el título)
-            logo_path = r"C:\Users\Imanol Rodríguez\OneDrive\Desktop\Proyecto_Samsung\Logo_Proyecto_Samsung.png"
+            logo_path = r"Logo_Proyecto_Samsung.png"
             if os.path.exists(logo_path):
                 img = Image.open(logo_path)
                 ar = img.width / img.height
@@ -700,4 +700,5 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = IAAnalisisApp(root)
     root.mainloop()
+
 
